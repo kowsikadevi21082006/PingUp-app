@@ -20,33 +20,107 @@ const Profile = () => {
   const [posts, setPosts] = useState([])
   const [activeTab, setActiveTab] = useState('posts')
   const [showEdit, setShowEdit] = useState(false)
+  const [error, setError] = useState(null)
 
   console.log('currentUser._id', currentUser?._id)
 
   const fetchUser = async (profileId) => {
     const token = await getToken()
     try {
+      console.log('Fetching profile for ID:', profileId);
+      setError(null)
       const { data } = await api.get(`/api/user/profiles/${profileId}`, {
         headers: {Authorization: `Bearer ${token}`}
       });
+      console.log('Profile response:', data);
       if (data.success) {
         setUser(data.profile)
         setPosts(data.posts)
-      }else{
-        toast.error(data.message)
+      } else {
+        setError(data.message || 'Profile not found')
+        toast.error(data.message || 'Profile not found')
       }
     } catch (error) {
-       toast.error(error.message)
+      console.error('Error fetching profile:', error);
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to load profile'
+      setError(errorMessage)
+      toast.error(errorMessage)
+    }
+  }
+
+  const createTestUser = async (profileId) => {
+    const token = await getToken()
+    try {
+      console.log('Creating test user for ID:', profileId);
+      const { data } = await api.post('/api/user/create-test', {
+        userId: profileId,
+        email: '',
+        full_name: 'Test User',
+        username: profileId
+      }, {
+        headers: {Authorization: `Bearer ${token}`}
+      });
+      console.log('Create test user response:', data);
+      if (data.success) {
+        toast.success('User created successfully')
+        // Try to fetch the profile again
+        fetchUser(profileId)
+      } else {
+        toast.error(data.message || 'Failed to create user')
+      }
+    } catch (error) {
+      console.error('Error creating test user:', error);
+      toast.error('Failed to create user')
     }
   }
 
   useEffect(() => {
+    console.log('Profile useEffect - profileId:', profileId, 'currentUser:', currentUser?._id);
     if (profileId) {
       fetchUser(profileId)
-    }else if (currentUser?._id){
+    } else if (currentUser?._id) {
       fetchUser(currentUser._id)
     }
   },[profileId, currentUser])
+
+  // Show loading if currentUser is not loaded yet and no profileId is provided
+  if (!profileId && !currentUser?._id) {
+    return <Loading />
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className='relative h-full overflow-y-scroll bg-gray-50 p-6'>
+        <div className='max-w-3xl mx-auto'>
+          <div className='bg-white rounded-2xl shadow p-8 text-center'>
+            <h2 className='text-2xl font-bold text-gray-800 mb-4'>Profile Not Found</h2>
+            <p className='text-gray-600 mb-6'>{error}</p>
+            <div className='space-y-4'>
+              <button 
+                onClick={() => window.history.back()} 
+                className='bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition-colors mr-4'
+              >
+                Go Back
+              </button>
+              <button 
+                onClick={() => {
+                  console.log('Creating test user for profileId:', profileId);
+                  // Try to create the user manually
+                  if (profileId) {
+                    createTestUser(profileId);
+                  }
+                }} 
+                className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors'
+              >
+                Try to Create Profile
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return user ? (
     <div className='relative h-full overflow-y-scroll bg-gray-50 p-6'>
@@ -74,14 +148,20 @@ const Profile = () => {
           {/* posts */}
           {activeTab === 'posts' && (
             <div className='mt-6 flex flex-col items-center gap-6'>
-              {posts.map((post)=> <PostCard key={post._id} post={post}/>)}
+              {posts.length > 0 ? (
+                posts.map((post)=> <PostCard key={post._id} post={post}/>)
+              ) : (
+                <div className='text-center text-gray-500 py-8'>
+                  <p>No posts yet</p>
+                </div>
+              )}
             </div>
           )}
           {/* Media */}
           {activeTab === 'media' && (
             <div className='flex flex-wrap mt-6 max-w-6xl'>
-              {
-                posts.filter((post)=>post.image_urls.length > 0).map((post)=> (
+              {posts.filter((post)=>post.image_urls && post.image_urls.length > 0).length > 0 ? (
+                posts.filter((post)=>post.image_urls && post.image_urls.length > 0).map((post)=> (
                   <>
                   {post.image_urls.map((image, index)=>(
                     <Link target='_blank' to={image} key={index} className='relative group'>
@@ -93,7 +173,11 @@ const Profile = () => {
                   ))}
                   </>
                 ))
-              }
+              ) : (
+                <div className='text-center text-gray-500 py-8 w-full'>
+                  <p>No media posts yet</p>
+                </div>
+              )}
             </div>
           )}
         </div>

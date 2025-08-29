@@ -9,15 +9,37 @@ import fs from'fs'
 //Get user data using userId
 export const getUserData = async (req, res) => {
     try {
-        const {userId} = req.auth()
+        const authData = req.auth();
+        console.log('getUserData - auth data:', authData);
+        
+        const {userId} = authData;
+        console.log('getUserData - userId:', userId);
+        
         let user = await User.findById(userId)
+        console.log('getUserData - existing user:', user ? 'Yes' : 'No');
+        
         if(!user){
             // Auto-create a minimal user; detailed sync can fill fields later
-            user = await User.findByIdAndUpdate(userId, { _id: userId }, { upsert: true, new: true })
+            const userData = {
+                _id: userId,
+                email: authData?.email || '',
+                full_name: authData?.full_name || '',
+                username: authData?.username || '',
+                bio: 'Hey there! I am using PingUp.',
+                profile_picture: '',
+                cover_photo: '',
+                location: '',
+                followers: [],
+                following: [],
+                connections: []
+            };
+            console.log('Creating new user with data:', userData);
+            user = await User.findByIdAndUpdate(userId, userData, { upsert: true, new: true })
+            console.log('New user created:', user._id);
         }
         res.json({success: true, user})
     } catch (error) {
-        console.log(error);
+        console.log('Error in getUserData:', error);
         res.json({success:false, message: error.message})
     }
 }
@@ -269,26 +291,116 @@ export const acceptConnectionRequest = async (req, res) => {
 }
 
 
+// Test endpoint to list all users
+export const getAllUsers = async (req, res) => {
+    try {
+        const users = await User.find({});
+        console.log('All users:', users.map(u => ({ _id: u._id, full_name: u.full_name, username: u.username })));
+        res.json({ success: true, users: users.map(u => ({ _id: u._id, full_name: u.full_name, username: u.username })) });
+    } catch (error) {
+        console.log('Error in getAllUsers:', error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// Test endpoint to create a user
+export const createTestUser = async (req, res) => {
+    try {
+        const { userId, email, full_name, username } = req.body;
+        console.log('Creating test user:', { userId, email, full_name, username });
+        
+        const user = await User.findByIdAndUpdate(userId, {
+            _id: userId,
+            email: email || '',
+            full_name: full_name || 'Test User',
+            username: username || userId,
+            bio: 'Hey there! I am using PingUp.',
+            profile_picture: '',
+            cover_photo: '',
+            location: '',
+            followers: [],
+            following: [],
+            connections: []
+        }, { upsert: true, new: true });
+        
+        console.log('Created test user:', user._id);
+        res.json({ success: true, user });
+    } catch (error) {
+        console.log('Error in createTestUser:', error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
 // get user profiles
-// server/controllers/userController.js
 export const getUserProfiles = async (req, res) => {
     try {
         const { profileId } = req.params;
         const cleanedId = String(profileId || '').trim();
         console.log('getUserProfiles param:', profileId, 'cleaned:', cleanedId, 'len:', cleanedId.length);
 
+        // Since we're using Clerk user IDs as _id (String type), we can directly use findById
         let profile = await User.findById(cleanedId);
-        if (!profile) profile = await User.findOne({ username: cleanedId });
-
+        console.log('Profile found by ID:', profile ? 'Yes' : 'No');
+        
+        // If not found by ID, try to find by username
         if (!profile) {
-            console.log('No profile for:', cleanedId);
-            return res.json({ success: false, message: `Profile not found` });
+            profile = await User.findOne({ username: cleanedId });
+            console.log('Profile found by username:', profile ? 'Yes' : 'No');
         }
 
+        if (!profile) {
+            console.log('No profile found for:', cleanedId);
+            // Let's also check if this is the current user trying to access their own profile
+            const authData = req.auth();
+            console.log('Full auth data:', JSON.stringify(authData, null, 2));
+            const { userId } = authData;
+            console.log('Current user ID from auth:', userId);
+            
+            if (userId === cleanedId) {
+                console.log('User trying to access their own profile, creating user...');
+                // Create the user if they don't exist
+                profile = await User.findByIdAndUpdate(userId, {
+                    _id: userId,
+                    email: authData?.email || '',
+                    full_name: authData?.full_name || '',
+                    username: authData?.username || '',
+                    bio: 'Hey there! I am using PingUp.',
+                    profile_picture: '',
+                    cover_photo: '',
+                    location: '',
+                    followers: [],
+                    following: [],
+                    connections: []
+                }, { upsert: true, new: true });
+                console.log('Created user profile:', profile._id);
+            } else {
+                // For other users, we need to create a basic profile if they don't exist
+                // This happens when someone tries to view a profile that hasn't been created yet
+                console.log('Creating basic profile for user:', cleanedId);
+                profile = await User.findByIdAndUpdate(cleanedId, {
+                    _id: cleanedId,
+                    email: '',
+                    full_name: 'User',
+                    username: cleanedId,
+                    bio: 'Hey there! I am using PingUp.',
+                    profile_picture: '',
+                    cover_photo: '',
+                    location: '',
+                    followers: [],
+                    following: [],
+                    connections: []
+                }, { upsert: true, new: true });
+                console.log('Created basic profile for user:', profile._id);
+            }
+        }
+
+        console.log('Found profile:', profile._id, profile.full_name);
         const posts = await Post.find({ user: profile._id }).populate('user');
+        console.log('Found posts count:', posts.length);
+        
         res.json({ success: true, profile, posts });
     } catch (error) {
-        console.log(error);
+        console.log('Error in getUserProfiles:', error);
         res.json({ success: false, message: error.message });
     }
 };
