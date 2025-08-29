@@ -10,9 +10,10 @@ import fs from'fs'
 export const getUserData = async (req, res) => {
     try {
         const {userId} = req.auth()
-        const user = await User.findById(userId)
+        let user = await User.findById(userId)
         if(!user){
-            return res.json({success: false, message: "User not found"})
+            // Auto-create a minimal user; detailed sync can fill fields later
+            user = await User.findByIdAndUpdate(userId, { _id: userId }, { upsert: true, new: true })
         }
         res.json({success: true, user})
     } catch (error) {
@@ -130,7 +131,7 @@ export const followUser = async (req, res) => {
             return res.json({success: false, message: 'You are already following this user'})
         }
 
-        user.following().push(id);
+        user.following.push(id);
         await user.save()
 
         const toUser = await User.findById(id)
@@ -157,7 +158,7 @@ export const unfollowUser = async (req, res) => {
         await user.save()
 
         const toUser = await User.findById(id)
-        toUser.followers = user.followers.filter(user=> user !== userId);
+        toUser.followers = toUser.followers.filter(user=> user !== userId);
         await toUser.save()
 
         res.json({success: true, message: 'You are no longer following this user'})
@@ -267,19 +268,27 @@ export const acceptConnectionRequest = async (req, res) => {
     }
 }
 
-//get user profiles
+
+// get user profiles
+// server/controllers/userController.js
 export const getUserProfiles = async (req, res) => {
     try {
-        const {profileId} = req.body;
-        const profile = await User.findById(profileId)
-        if (!profile) {
-            return res.json({success: false, message: "Profile not found"});
-        }
-        const posts = await Post.find({user: profileId}).populate('user')
+        const { profileId } = req.params;
+        const cleanedId = String(profileId || '').trim();
+        console.log('getUserProfiles param:', profileId, 'cleaned:', cleanedId, 'len:', cleanedId.length);
 
-        res.json({success:true, profile, posts})
+        let profile = await User.findById(cleanedId);
+        if (!profile) profile = await User.findOne({ username: cleanedId });
+
+        if (!profile) {
+            console.log('No profile for:', cleanedId);
+            return res.json({ success: false, message: `Profile not found` });
+        }
+
+        const posts = await Post.find({ user: profile._id }).populate('user');
+        res.json({ success: true, profile, posts });
     } catch (error) {
         console.log(error);
-        res.json({success: false, message: error.message})
+        res.json({ success: false, message: error.message });
     }
-}
+};
